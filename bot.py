@@ -1,400 +1,363 @@
 import os
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 import requests
 
 
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+SERVIX_API_KEY = os.environ["SERVIX_API_KEY"]
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+
 SERVIX_URL = "https://servix.cc/api/v1/assets"
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-SERVIX_API_KEY = os.getenv("SERVIX_API_KEY")
+TELEGRAM_URL = (
+    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+)
 
+TIMEZONE = "Asia/Tehran"
+
+
+# ============================================================
+# ASSET CODES
+# ============================================================
 
 ASSET_CODES = {
     "usd": "USD_RLS",
     "eur": "EUR_RLS",
-    "gold_18": "GOLD_18_RLS",
-    "gold_24": "GOLD_24_RLS",
+
+    "gold18": "GOLD_18_RLS",
+    "gold24": "GOLD_24_RLS",
     "gold_ounce": "GOLD_OUNCE_USD",
-    "sekkeh_emami": "SEKKEH_RLS",
-    "nim_sekkeh": "NIM_SEKKEH_RLS",
-    "rob_sekkeh": "ROB_SEKKEH_RLS",
+
+    "emami": "SEKKEH_RLS",
+    "half": "NIM_SEKKEH_RLS",
+    "quarter": "ROB_SEKKEH_RLS",
     "bahar": "BAHAR_RLS",
-    "gerami_sekkeh": "GERAMI_SEKKEH_RLS",
+    "gerami": "GERAMI_SEKKEH_RLS",
+
     "silver_ounce": "SILVER_OUNCE_USD",
+
     "bitcoin": "BTC_USD",
 }
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
+def require_environment():
+    required = {
+        "SERVIX_API_KEY": SERVIX_API_KEY,
+        "TELEGRAM_BOT_TOKEN": TELEGRAM_BOT_TOKEN,
+        "TELEGRAM_CHAT_ID": TELEGRAM_CHAT_ID,
+    }
+
+    missing = [
+        name
+        for name, value in required.items()
+        if value is None or str(value).strip() == ""
+    ]
+
+    if missing:
+        raise RuntimeError(
+            "Missing required environment variables: "
+            + ", ".join(missing)
+        )
+
+
 def to_decimal(value):
-    return Decimal(str(value))
+    if value is None:
+        return None
+
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
 
 
-def format_number(value):
-    """
-    نمایش عدد:
-    - بدون اعشار
-    - گرد شده به نزدیک‌ترین عدد صحیح
-    - با جداکننده هزارگان
-    """
-    number = to_decimal(value).quantize(
-        Decimal("1"),
-        rounding=ROUND_HALF_UP
-    )
+def format_number(value, decimals=2):
+    number = to_decimal(value)
 
-    formatted = f"{number:,}"
+    if number is None:
+        return "—"
 
-    # تبدیل جداکننده انگلیسی به جداکننده فارسی
-    formatted = formatted.replace(",", "٬")
+    if decimals == 0:
+        return f"{number:,.0f}"
 
-    # تبدیل اعداد انگلیسی به فارسی
-    persian_digits = str.maketrans(
-        "0123456789",
-        "۰۱۲۳۴۵۶۷۸۹"
-    )
+    text = f"{number:,.{decimals}f}"
 
-    return formatted.translate(persian_digits)
+    text = text.rstrip("0").rstrip(".")
+
+    return text
+
+
+def format_toman_from_rial(value):
+    number = to_decimal(value)
+
+    if number is None:
+        return "—"
+
+    toman_value = number / Decimal("10")
+
+    return format_number(toman_value, 2)
 
 
 def format_usd(value):
-    return "$" + format_number(value)
+    number = to_decimal(value)
+
+    if number is None:
+        return "—"
+
+    return format_number(number, 2)
 
 
-def gregorian_to_jalali(gy, gm, gd):
-    """
-    تبدیل تاریخ میلادی به شمسی
-    """
-    g_days_in_month = [
-        31, 28, 31, 30, 31, 30,
-        31, 31, 30, 31, 30, 31
-    ]
+def find_asset(data, code):
+    for item in data:
+        if item.get("code") == code:
+            return item
 
-    j_days_in_month = [
-        31, 31, 31, 31, 31, 31,
-        30, 30, 30, 30, 30, 29
-    ]
-
-    gy2 = gy - 1600
-    gm2 = gm - 1
-    gd2 = gd - 1
-
-    g_day_no = (
-        365 * gy2
-        + (gy2 + 3) // 4
-        - (gy2 + 99) // 100
-        + (gy2 + 399) // 400
-    )
-
-    for i in range(gm2):
-        g_day_no += g_days_in_month[i]
-
-    if gm2 > 1 and (
-        gy % 4 == 0
-        and (gy % 100 != 0 or gy % 400 == 0)
-    ):
-        g_day_no += 1
-
-    g_day_no += gd2
-
-    j_day_no = g_day_no - 79
-
-    j_np = j_day_no // 12053
-    j_day_no %= 12053
-
-    jy = 979 + 33 * j_np + 4 * (j_day_no // 1461)
-    j_day_no %= 1461
-
-    if j_day_no >= 366:
-        jy += (j_day_no - 1) // 365
-        j_day_no = (j_day_no - 1) % 365
-
-    i = 0
-
-    while (
-        i < 11
-        and j_day_no >= j_days_in_month[i]
-    ):
-        j_day_no -= j_days_in_month[i]
-        i += 1
-
-    jm = i + 1
-    jd = j_day_no + 1
-
-    return jy, jm, jd
+    return None
 
 
-def get_jalali_date():
-    iran_time = datetime.now(
-        ZoneInfo("Asia/Tehran")
-    )
+def get_asset_value(data, code):
+    asset = find_asset(data, code)
 
-    jy, jm, jd = gregorian_to_jalali(
-        iran_time.year,
-        iran_time.month,
-        iran_time.day
-    )
+    if asset is None:
+        return None
 
-    return (
-        f"{jy:04d}/{jm:02d}/{jd:02d}"
-    ).translate(
-        str.maketrans(
-            "0123456789",
-            "۰۱۲۳۴۵۶۷۸۹"
-        )
-    )
+    return asset.get("value")
 
 
-def get_iran_time():
-    return datetime.now(
-        ZoneInfo("Asia/Tehran")
-    )
-
+# ============================================================
+# SERVIX
+# ============================================================
 
 def get_prices():
-    if not SERVIX_API_KEY:
+    headers = {
+        "X-API-Key": SERVIX_API_KEY,
+        "Accept": "application/json",
+    }
+
+    try:
+        response = requests.get(
+            SERVIX_URL,
+            headers=headers,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
         raise RuntimeError(
-            "SERVIX_API_KEY is not configured."
-        )
+            f"Could not connect to Servix: {exc}"
+        ) from exc
 
-    response = requests.get(
-        SERVIX_URL,
-        headers={
-            "X-API-Key": SERVIX_API_KEY
-        },
-        timeout=30
-    )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    if isinstance(data, dict):
-        assets = data.get("data", data.get("assets", data))
-    else:
-        assets = data
-
-    if not isinstance(assets, list):
+    if response.status_code != 200:
         raise RuntimeError(
-            "Unexpected Servix API response format."
+            f"Servix returned HTTP {response.status_code}: "
+            f"{response.text[:500]}"
         )
 
-    prices = {}
-
-    for asset in assets:
-        if not isinstance(asset, dict):
-            continue
-
-        code = (
-            asset.get("code")
-            or asset.get("symbol")
-            or asset.get("name")
-        )
-
-        value = (
-            asset.get("value")
-            if "value" in asset
-            else asset.get("price")
-        )
-
-        if code and value is not None:
-            prices[code] = value
-
-    return prices
-
-
-def get_value(prices, code):
-    if code not in prices:
+    try:
+        data = response.json()
+    except ValueError as exc:
         raise RuntimeError(
-            f"Required asset not found: {code}"
+            "Servix returned invalid JSON."
+        ) from exc
+
+    if not isinstance(data, list):
+        raise RuntimeError(
+            "Unexpected Servix response format. "
+            "Expected a list of assets."
         )
 
-    return prices[code]
+    if len(data) == 0:
+        raise RuntimeError(
+            "Servix returned an empty asset list."
+        )
+
+    return data
 
 
-def create_report(prices):
-    iran_time = get_iran_time()
+def validate_required_assets(data):
+    missing = []
 
-    hour = iran_time.strftime("%H")
-    minute = iran_time.strftime("%M")
+    for code in ASSET_CODES.values():
+        if find_asset(data, code) is None:
+            missing.append(code)
 
-    persian_digits = str.maketrans(
-        "0123456789",
-        "۰۱۲۳۴۵۶۷۸۹"
-    )
+    if missing:
+        raise RuntimeError(
+            "The following required Servix assets were not found: "
+            + ", ".join(missing)
+        )
 
-    time_text = f"{hour}:{minute}".translate(
-        persian_digits
-    )
 
-    date_text = get_jalali_date()
+# ============================================================
+# REPORT
+# ============================================================
 
-    usd = get_value(prices, ASSET_CODES["usd"])
-    eur = get_value(prices, ASSET_CODES["eur"])
+def create_report(data):
 
-    gold_18 = get_value(
-        prices,
-        ASSET_CODES["gold_18"]
-    )
+    validate_required_assets(data)
 
-    gold_24 = get_value(
-        prices,
-        ASSET_CODES["gold_24"]
-    )
+    usd = get_asset_value(data, ASSET_CODES["usd"])
+    eur = get_asset_value(data, ASSET_CODES["eur"])
 
-    gold_ounce = get_value(
-        prices,
-        ASSET_CODES["gold_ounce"]
-    )
+    gold18 = get_asset_value(data, ASSET_CODES["gold18"])
+    gold24 = get_asset_value(data, ASSET_CODES["gold24"])
+    gold_ounce = get_asset_value(data, ASSET_CODES["gold_ounce"])
 
-    sekkeh_emami = get_value(
-        prices,
-        ASSET_CODES["sekkeh_emami"]
-    )
+    emami = get_asset_value(data, ASSET_CODES["emami"])
+    half = get_asset_value(data, ASSET_CODES["half"])
+    quarter = get_asset_value(data, ASSET_CODES["quarter"])
+    bahar = get_asset_value(data, ASSET_CODES["bahar"])
+    gerami = get_asset_value(data, ASSET_CODES["gerami"])
 
-    nim_sekkeh = get_value(
-        prices,
-        ASSET_CODES["nim_sekkeh"]
-    )
-
-    rob_sekkeh = get_value(
-        prices,
-        ASSET_CODES["rob_sekkeh"]
-    )
-
-    bahar = get_value(
-        prices,
-        ASSET_CODES["bahar"]
-    )
-
-    gerami_sekkeh = get_value(
-        prices,
-        ASSET_CODES["gerami_sekkeh"]
-    )
-
-    silver_ounce = get_value(
-        prices,
+    silver_ounce = get_asset_value(
+        data,
         ASSET_CODES["silver_ounce"]
     )
 
-    bitcoin = get_value(
-        prices,
+    bitcoin = get_asset_value(
+        data,
         ASSET_CODES["bitcoin"]
     )
 
-    report = f"""📊 بازارنما | Bazar Nama
-📅 {date_text} | ⏰ {time_text}
+    now = datetime.now(
+        ZoneInfo(TIMEZONE)
+    )
 
-💵 ارز
-💵 دلار آزاد: {format_number(usd)} تومان
-💶 یورو: {format_number(eur)} تومان
+    date_text = now.strftime("%Y/%m/%d")
+    time_text = now.strftime("%H:%M")
 
-🥇 طلا
-🟡 طلای ۱۸ عیار: {format_number(gold_18)} تومان
-🟡 طلای ۲۴ عیار: {format_number(gold_24)} تومان
-🌎 اونس طلا: {format_usd(gold_ounce)}
+    report = (
+        "<b>📊 بازارنما | Bazar Nama</b>\n"
+        f"📅 {date_text} | ⏰ {time_text}\n"
+        "\n"
 
-🪙 سکه
-🔴 سکه امامی: {format_number(sekkeh_emami)} تومان
-🟠 نیم‌سکه: {format_number(nim_sekkeh)} تومان
-🟠 ربع‌سکه: {format_number(rob_sekkeh)} تومان
-🟡 بهار آزادی: {format_number(bahar)} تومان
-🟡 سکه گرمی: {format_number(gerami_sekkeh)} تومان
+        "<b>💵 ارز</b>\n"
+        f"💵 دلار آزاد: <b>{format_toman_from_rial(usd)} تومان</b>\n"
+        f"💶 یورو: <b>{format_toman_from_rial(eur)} تومان</b>\n"
+        "\n"
 
-🥈 نقره
-🥈 اونس نقره: {format_usd(silver_ounce)}
+        "<b>🥇 طلا</b>\n"
+        f"🟡 طلای ۱۸ عیار: <b>{format_toman_from_rial(gold18)} تومان</b>\n"
+        f"🟡 طلای ۲۴ عیار: <b>{format_toman_from_rial(gold24)} تومان</b>\n"
+        f"🌎 اونس طلا: <b>${format_usd(gold_ounce)}</b>\n"
+        "\n"
 
-₿ ارز دیجیتال
-₿ بیت‌کوین: {format_usd(bitcoin)}
+        "<b>🪙 سکه</b>\n"
+        f"🔴 سکه امامی: <b>{format_toman_from_rial(emami)} تومان</b>\n"
+        f"🟠 نیم‌سکه: <b>{format_toman_from_rial(half)} تومان</b>\n"
+        f"🟠 ربع‌سکه: <b>{format_toman_from_rial(quarter)} تومان</b>\n"
+        f"🟡 بهار آزادی: <b>{format_toman_from_rial(bahar)} تومان</b>\n"
+        f"🟡 سکه گرمی: <b>{format_toman_from_rial(gerami)} تومان</b>\n"
+        "\n"
 
-🔗 @BazarNamaOfficial"""
+        "<b>🥈 نقره</b>\n"
+        f"🥈 اونس نقره: <b>${format_usd(silver_ounce)}</b>\n"
+        "\n"
+
+        "<b>₿ ارز دیجیتال</b>\n"
+        f"₿ بیت‌کوین: <b>${format_usd(bitcoin)}</b>\n"
+        "\n"
+
+        "🔗 <b>@BazarNamaOfficial</b>"
+    )
 
     return report
 
 
+# ============================================================
+# TELEGRAM
+# ============================================================
+
 def send_to_telegram(message):
-    if not TELEGRAM_BOT_TOKEN:
+
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+
+    try:
+        response = requests.post(
+            TELEGRAM_URL,
+            json=payload,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
         raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN is not configured."
+            f"Could not connect to Telegram: {exc}"
+        ) from exc
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Telegram returned HTTP {response.status_code}: "
+            f"{response.text[:500]}"
         )
 
-    if not TELEGRAM_CHAT_ID:
+    try:
+        result = response.json()
+    except ValueError as exc:
         raise RuntimeError(
-            "TELEGRAM_CHAT_ID is not configured."
-        )
-
-    telegram_url = (
-        f"https://api.telegram.org/"
-        f"bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    )
-
-    response = requests.post(
-        telegram_url,
-        json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message
-        },
-        timeout=30
-    )
-
-    if not response.ok:
-        raise RuntimeError(
-            "Telegram returned HTTP "
-            f"{response.status_code}: "
-            f"{response.text}"
-        )
-
-    result = response.json()
+            "Telegram returned invalid JSON."
+        ) from exc
 
     if not result.get("ok"):
         raise RuntimeError(
-            f"Telegram error: {result}"
+            f"Telegram API error: {result}"
         )
 
     return result
 
 
-def validate_required_assets(prices):
-    missing = []
-
-    for name, code in ASSET_CODES.items():
-        if code not in prices:
-            missing.append(
-                f"{name} ({code})"
-            )
-
-    if missing:
-        raise RuntimeError(
-            "Missing required assets: "
-            + ", ".join(missing)
-        )
-
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    print("اتصال به Servix...")
 
-    prices = get_prices()
+    print("========================================")
+    print("Bazar Nama starting...")
+    print("========================================")
+
+    require_environment()
+
+    print("1/4 - دریافت قیمت‌ها از Servix...")
+
+    data = get_prices()
 
     print(
-        f"{len(prices)} دارایی دریافت شد."
+        f"    تعداد دارایی‌های دریافت‌شده: {len(data)}"
     )
 
-    validate_required_assets(prices)
+    print("2/4 - بررسی دارایی‌های موردنیاز...")
 
-    print("همه دارایی‌های موردنیاز موجود هستند.")
+    validate_required_assets(data)
 
-    report = create_report(prices)
+    print("    همه دارایی‌های موردنیاز موجود هستند.")
 
-    print("گزارش ساخته شد:")
-    print(report)
+    print("3/4 - ساخت گزارش...")
 
-    print("ارسال گزارش به تلگرام...")
+    report = create_report(data)
+
+    print(
+        f"    طول گزارش: {len(report)} کاراکتر"
+    )
+
+    print("4/4 - ارسال گزارش به Telegram...")
 
     send_to_telegram(report)
 
+    print("========================================")
     print("گزارش با موفقیت ارسال شد.")
+    print("========================================")
 
 
 if __name__ == "__main__":
