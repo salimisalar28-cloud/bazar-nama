@@ -182,16 +182,3 @@ def send_to_telegram(message):
 
 
 def main():
-
-    print("دریافت قیمت‌ها از Servix...")
-
-    data = get_prices()
-
-    print(
-        "تعداد دارایی‌های دریافت‌شده:",
-        len(data)
-    )
-
-    report = create_report(data)
-
-    print("ارسال گزارش به
