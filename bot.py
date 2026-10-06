@@ -28,7 +28,6 @@ def get_prices():
 def toman(value):
     if value is None:
         return None
-
     return value / 10
 
 
@@ -58,7 +57,6 @@ def find_asset(data, code):
     for item in data:
         if item.get("code") == code:
             return item
-
     return None
 
 
@@ -88,4 +86,112 @@ def create_report(data):
 
     silver_ounce = get_value(data, "SILVER_OUNCE_USD")
 
-   
+    btc = get_value(data, "BTC_USD")
+
+    now = datetime.now(ZoneInfo("Asia/Tehran"))
+
+    date_text = now.strftime("%Y/%m/%d")
+    time_text = now.strftime("%H:%M")
+
+    report = (
+        "<b>📊 بازارنما | Bazar Nama</b>\n"
+        "\n"
+        "🕐 <b>گزارش بازار</b>\n"
+        f"📅 {date_text}\n"
+        f"⏰ {time_text}\n"
+        "\n"
+        "━━━━━━━━━━━━━━\n"
+        "\n"
+        "<b>💵 ارز</b>\n"
+        "\n"
+        f"💵 دلار:\n<b>{format_toman(usd)} تومان</b>\n"
+        "\n"
+        f"💶 یورو:\n<b>{format_toman(eur)} تومان</b>\n"
+        "\n"
+        "━━━━━━━━━━━━━━\n"
+        "\n"
+        "<b>🥇 طلا</b>\n"
+        "\n"
+        f"🟡 طلای ۱۸ عیار:\n<b>{format_toman(gold18)} تومان</b>\n"
+        "\n"
+        f"🟡 طلای ۲۴ عیار:\n<b>{format_toman(gold24)} تومان</b>\n"
+        "\n"
+        f"🌎 اونس طلا:\n<b>${format_usd(gold_ounce)}</b>\n"
+        "\n"
+        "━━━━━━━━━━━━━━\n"
+        "\n"
+        "<b>🪙 سکه</b>\n"
+        "\n"
+        f"🔴 سکه امامی:\n<b>{format_toman(emami)} تومان</b>\n"
+        "\n"
+        f"🟠 نیم‌سکه:\n<b>{format_toman(half)} تومان</b>\n"
+        "\n"
+        f"🟠 ربع‌سکه:\n<b>{format_toman(quarter)} تومان</b>\n"
+        "\n"
+        f"🟡 بهار آزادی:\n<b>{format_toman(bahar)} تومان</b>\n"
+        "\n"
+        f"🟡 سکه گرمی:\n<b>{format_toman(gerami)} تومان</b>\n"
+        "\n"
+        "━━━━━━━━━━━━━━\n"
+        "\n"
+        "<b>🥈 نقره</b>\n"
+        "\n"
+        f"🥈 اونس نقره:\n<b>${format_usd(silver_ounce)}</b>\n"
+        "\n"
+        "━━━━━━━━━━━━━━\n"
+        "\n"
+        "<b>₿ ارزهای دیجیتال</b>\n"
+        "\n"
+        f"₿ بیت‌کوین:\n<b>${format_usd(btc)}</b>\n"
+        "\n"
+        "━━━━━━━━━━━━━━\n"
+        "\n"
+        "📡 <b>منبع داده: Servix</b>\n"
+        "🤖 <b>Bazar Nama | بازارنما</b>"
+    )
+
+    return report
+
+
+def send_to_telegram(message):
+
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    )
+
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    result = response.json()
+
+    if not result.get("ok"):
+        raise Exception(f"Telegram error: {result}")
+
+
+def main():
+
+    print("دریافت قیمت‌ها از Servix...")
+
+    data = get_prices()
+
+    print(
+        "تعداد دارایی‌های دریافت‌شده:",
+        len(data)
+    )
+
+    report = create_report(data)
+
+    print("ارسال گزارش به
