@@ -15,6 +15,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 SERVIX_URL = "https://servix.cc/api/v1/assets"
+
 TELEGRAM_URL = (
     f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 )
@@ -51,11 +52,6 @@ ASSET_CODES = {
 # ============================================================
 
 def require_environment():
-    """
-    Verify that all required environment variables exist.
-    Secrets themselves are never printed.
-    """
-
     required = {
         "SERVIX_API_KEY": SERVIX_API_KEY,
         "TELEGRAM_BOT_TOKEN": TELEGRAM_BOT_TOKEN,
@@ -76,10 +72,6 @@ def require_environment():
 
 
 def to_decimal(value):
-    """
-    Safely convert numeric API values to Decimal.
-    """
-
     if value is None:
         return None
 
@@ -90,10 +82,6 @@ def to_decimal(value):
 
 
 def format_number(value, decimals=2):
-    """
-    Format a numeric value with thousands separators.
-    """
-
     number = to_decimal(value)
 
     if number is None:
@@ -104,18 +92,12 @@ def format_number(value, decimals=2):
 
     text = f"{number:,.{decimals}f}"
 
-    # Remove unnecessary trailing zeroes.
     text = text.rstrip("0").rstrip(".")
 
     return text
 
 
 def format_toman_from_rial(value):
-    """
-    Servix RLS values are Iranian Rial.
-    Convert Rial -> Toman by dividing by 10.
-    """
-
     number = to_decimal(value)
 
     if number is None:
@@ -127,10 +109,6 @@ def format_toman_from_rial(value):
 
 
 def format_usd(value):
-    """
-    Format USD-based asset values.
-    """
-
     number = to_decimal(value)
 
     if number is None:
@@ -140,10 +118,6 @@ def format_usd(value):
 
 
 def find_asset(data, code):
-    """
-    Find an asset by its Servix code.
-    """
-
     for item in data:
         if item.get("code") == code:
             return item
@@ -152,10 +126,6 @@ def find_asset(data, code):
 
 
 def get_asset_value(data, code):
-    """
-    Return the current value of a specific asset.
-    """
-
     asset = find_asset(data, code)
 
     if asset is None:
@@ -169,10 +139,6 @@ def get_asset_value(data, code):
 # ============================================================
 
 def get_prices():
-    """
-    Get the latest complete asset list from Servix.
-    """
-
     headers = {
         "X-API-Key": SERVIX_API_KEY,
         "Accept": "application/json",
@@ -217,10 +183,6 @@ def get_prices():
 
 
 def validate_required_assets(data):
-    """
-    Check that every asset required by the report exists.
-    """
-
     missing = []
 
     for code in ASSET_CODES.values():
@@ -239,9 +201,6 @@ def validate_required_assets(data):
 # ============================================================
 
 def create_report(data):
-    """
-    Build the Telegram market report.
-    """
 
     validate_required_assets(data)
 
@@ -277,70 +236,37 @@ def create_report(data):
 
     report = (
         "<b>📊 بازارنما | Bazar Nama</b>\n"
+        f"📅 {date_text} | ⏰ {time_text}\n"
         "\n"
-        f"📅 تاریخ: <b>{date_text}</b>\n"
-        f"⏰ ساعت: <b>{time_text}</b>\n"
-        "\n"
-        "━━━━━━━━━━━━━━\n"
-        "\n"
+
         "<b>💵 ارز</b>\n"
+        f"💵 دلار آزاد: <b>{format_toman_from_rial(usd)} تومان</b>\n"
+        f"💶 یورو: <b>{format_toman_from_rial(eur)} تومان</b>\n"
         "\n"
-        f"💵 دلار آزاد:\n"
-        f"<b>{format_toman_from_rial(usd)} تومان</b>\n"
-        "\n"
-        f"💶 یورو:\n"
-        f"<b>{format_toman_from_rial(eur)} تومان</b>\n"
-        "\n"
-        "━━━━━━━━━━━━━━\n"
-        "\n"
+
         "<b>🥇 طلا</b>\n"
+        f"🟡 طلای ۱۸ عیار: <b>{format_toman_from_rial(gold18)} تومان</b>\n"
+        f"🟡 طلای ۲۴ عیار: <b>{format_toman_from_rial(gold24)} تومان</b>\n"
+        f"🌎 اونس طلا: <b>${format_usd(gold_ounce)}</b>\n"
         "\n"
-        f"🟡 طلای ۱۸ عیار:\n"
-        f"<b>{format_toman_from_rial(gold18)} تومان</b>\n"
-        "\n"
-        f"🟡 طلای ۲۴ عیار:\n"
-        f"<b>{format_toman_from_rial(gold24)} تومان</b>\n"
-        "\n"
-        f"🌎 اونس طلا:\n"
-        f"<b>${format_usd(gold_ounce)}</b>\n"
-        "\n"
-        "━━━━━━━━━━━━━━\n"
-        "\n"
+
         "<b>🪙 سکه</b>\n"
+        f"🔴 سکه امامی: <b>{format_toman_from_rial(emami)} تومان</b>\n"
+        f"🟠 نیم‌سکه: <b>{format_toman_from_rial(half)} تومان</b>\n"
+        f"🟠 ربع‌سکه: <b>{format_toman_from_rial(quarter)} تومان</b>\n"
+        f"🟡 بهار آزادی: <b>{format_toman_from_rial(bahar)} تومان</b>\n"
+        f"🟡 سکه گرمی: <b>{format_toman_from_rial(gerami)} تومان</b>\n"
         "\n"
-        f"🔴 سکه امامی:\n"
-        f"<b>{format_toman_from_rial(emami)} تومان</b>\n"
-        "\n"
-        f"🟠 نیم‌سکه:\n"
-        f"<b>{format_toman_from_rial(half)} تومان</b>\n"
-        "\n"
-        f"🟠 ربع‌سکه:\n"
-        f"<b>{format_toman_from_rial(quarter)} تومان</b>\n"
-        "\n"
-        f"🟡 بهار آزادی:\n"
-        f"<b>{format_toman_from_rial(bahar)} تومان</b>\n"
-        "\n"
-        f"🟡 سکه گرمی:\n"
-        f"<b>{format_toman_from_rial(gerami)} تومان</b>\n"
-        "\n"
-        "━━━━━━━━━━━━━━\n"
-        "\n"
+
         "<b>🥈 نقره</b>\n"
+        f"🥈 اونس نقره: <b>${format_usd(silver_ounce)}</b>\n"
         "\n"
-        f"🥈 اونس نقره:\n"
-        f"<b>${format_usd(silver_ounce)}</b>\n"
-        "\n"
-        "━━━━━━━━━━━━━━\n"
-        "\n"
+
         "<b>₿ ارز دیجیتال</b>\n"
+        f"₿ بیت‌کوین: <b>${format_usd(bitcoin)}</b>\n"
         "\n"
-        f"₿ بیت‌کوین:\n"
-        f"<b>${format_usd(bitcoin)}</b>\n"
-        "\n"
-        "━━━━━━━━━━━━━━\n"
-        "\n"
-        "📡 <b>منبع داده: Servix</b>\n"
-        "🤖 <b>Bazar Nama | بازارنما</b>"
+
+        "🔗 <b>@BazarNamaOfficial</b>"
     )
 
     return report
@@ -351,9 +277,6 @@ def create_report(data):
 # ============================================================
 
 def send_to_telegram(message):
-    """
-    Send the generated report to Telegram.
-    """
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -399,6 +322,7 @@ def send_to_telegram(message):
 # ============================================================
 
 def main():
+
     print("========================================")
     print("Bazar Nama starting...")
     print("========================================")
