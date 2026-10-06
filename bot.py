@@ -81,20 +81,33 @@ def to_decimal(value):
         return None
 
 
-def format_number(value, decimals=2):
+# ============================================================
+# PERSIAN NUMBER FORMAT
+# ============================================================
+
+def to_persian_digits(text):
+    translation = str.maketrans(
+        "0123456789",
+        "۰۱۲۳۴۵۶۷۸۹"
+    )
+
+    return str(text).translate(translation)
+
+
+def format_number(value, decimals=0):
     number = to_decimal(value)
 
     if number is None:
         return "—"
 
-    if decimals == 0:
-        return f"{number:,.0f}"
-
     text = f"{number:,.{decimals}f}"
 
-    text = text.rstrip("0").rstrip(".")
+    if decimals > 0:
+        text = text.rstrip("0").rstrip(".")
 
-    return text
+    text = text.replace(",", "٬")
+
+    return to_persian_digits(text)
 
 
 def format_toman_from_rial(value):
@@ -103,9 +116,11 @@ def format_toman_from_rial(value):
     if number is None:
         return "—"
 
+    # IMPORTANT:
+    # Rial -> Toman conversion
     toman_value = number / Decimal("10")
 
-    return format_number(toman_value, 2)
+    return format_number(toman_value, 0)
 
 
 def format_usd(value):
@@ -114,8 +129,109 @@ def format_usd(value):
     if number is None:
         return "—"
 
-    return format_number(number, 2)
+    return format_number(number, 0)
 
+
+# ============================================================
+# GREGORIAN -> JALALI
+# ============================================================
+
+def gregorian_to_jalali(gy, gm, gd):
+
+    g_days_in_month = [
+        31, 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31
+    ]
+
+    j_days_in_month = [
+        31, 31, 31, 31, 31, 31,
+        30, 30, 30, 30, 30, 29
+    ]
+
+    gy2 = gy - 1600
+    gm2 = gm - 1
+    gd2 = gd - 1
+
+    g_day_no = (
+        365 * gy2
+        + (gy2 + 3) // 4
+        - (gy2 + 99) // 100
+        + (gy2 + 399) // 400
+    )
+
+    for i in range(gm2):
+        g_day_no += g_days_in_month[i]
+
+    if (
+        gm2 > 1
+        and (
+            (gy % 4 == 0 and gy % 100 != 0)
+            or gy % 400 == 0
+        )
+    ):
+        g_day_no += 1
+
+    g_day_no += gd2
+
+    j_day_no = g_day_no - 79
+
+    j_np = j_day_no // 12053
+    j_day_no %= 12053
+
+    jy = (
+        979
+        + 33 * j_np
+        + 4 * (j_day_no // 1461)
+    )
+
+    j_day_no %= 1461
+
+    if j_day_no >= 366:
+        jy += (j_day_no - 1) // 365
+        j_day_no = (j_day_no - 1) % 365
+
+    i = 0
+
+    while (
+        i < 11
+        and j_day_no >= j_days_in_month[i]
+    ):
+        j_day_no -= j_days_in_month[i]
+        i += 1
+
+    jm = i + 1
+    jd = j_day_no + 1
+
+    return jy, jm, jd
+
+
+def get_persian_datetime():
+
+    now = datetime.now(
+        ZoneInfo(TIMEZONE)
+    )
+
+    jy, jm, jd = gregorian_to_jalali(
+        now.year,
+        now.month,
+        now.day
+    )
+
+    date_text = (
+        f"{jy:04d}/{jm:02d}/{jd:02d}"
+    )
+
+    time_text = now.strftime("%H:%M")
+
+    return (
+        to_persian_digits(date_text),
+        to_persian_digits(time_text)
+    )
+
+
+# ============================================================
+# SERVIX
+# ============================================================
 
 def find_asset(data, code):
     for item in data:
@@ -134,11 +250,8 @@ def get_asset_value(data, code):
     return asset.get("value")
 
 
-# ============================================================
-# SERVIX
-# ============================================================
-
 def get_prices():
+
     headers = {
         "X-API-Key": SERVIX_API_KEY,
         "Accept": "application/json",
@@ -183,9 +296,11 @@ def get_prices():
 
 
 def validate_required_assets(data):
+
     missing = []
 
     for code in ASSET_CODES.values():
+
         if find_asset(data, code) is None:
             missing.append(code)
 
@@ -204,18 +319,55 @@ def create_report(data):
 
     validate_required_assets(data)
 
-    usd = get_asset_value(data, ASSET_CODES["usd"])
-    eur = get_asset_value(data, ASSET_CODES["eur"])
+    usd = get_asset_value(
+        data,
+        ASSET_CODES["usd"]
+    )
 
-    gold18 = get_asset_value(data, ASSET_CODES["gold18"])
-    gold24 = get_asset_value(data, ASSET_CODES["gold24"])
-    gold_ounce = get_asset_value(data, ASSET_CODES["gold_ounce"])
+    eur = get_asset_value(
+        data,
+        ASSET_CODES["eur"]
+    )
 
-    emami = get_asset_value(data, ASSET_CODES["emami"])
-    half = get_asset_value(data, ASSET_CODES["half"])
-    quarter = get_asset_value(data, ASSET_CODES["quarter"])
-    bahar = get_asset_value(data, ASSET_CODES["bahar"])
-    gerami = get_asset_value(data, ASSET_CODES["gerami"])
+    gold18 = get_asset_value(
+        data,
+        ASSET_CODES["gold18"]
+    )
+
+    gold24 = get_asset_value(
+        data,
+        ASSET_CODES["gold24"]
+    )
+
+    gold_ounce = get_asset_value(
+        data,
+        ASSET_CODES["gold_ounce"]
+    )
+
+    emami = get_asset_value(
+        data,
+        ASSET_CODES["emami"]
+    )
+
+    half = get_asset_value(
+        data,
+        ASSET_CODES["half"]
+    )
+
+    quarter = get_asset_value(
+        data,
+        ASSET_CODES["quarter"]
+    )
+
+    bahar = get_asset_value(
+        data,
+        ASSET_CODES["bahar"]
+    )
+
+    gerami = get_asset_value(
+        data,
+        ASSET_CODES["gerami"]
+    )
 
     silver_ounce = get_asset_value(
         data,
@@ -227,12 +379,7 @@ def create_report(data):
         ASSET_CODES["bitcoin"]
     )
 
-    now = datetime.now(
-        ZoneInfo(TIMEZONE)
-    )
-
-    date_text = now.strftime("%Y/%m/%d")
-    time_text = now.strftime("%H:%M")
+    date_text, time_text = get_persian_datetime()
 
     report = (
         "<b>📊 بازارنما | Bazar Nama</b>\n"
